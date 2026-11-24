@@ -7,6 +7,8 @@ Live AIS ship tracking for Home Assistant using [aisstream.io](https://aisstream
 - **Favorite vessels** (by MMSI) get a device tracker, a status sensor, speed and last-seen sensors, and their own track retention, up to **unlimited**.
 - The bundled **`custom:aisstream-map-card`** card draws ship icons (pentagons pointing along the heading) colored by type, fading tracks, popups with vessel details, a category legend/filter, and full history for favorites.
 
+<img width="863" height="643" alt="Screenshot 2026-11-24 at 12 47 03 PM" src="https://github.com/user-attachments/assets/29e20c7c-49d0-4d53-b1c5-3d4e7e58d574" />
+
 ## Installation
 
 1. In HACS → ⋮ → *Custom repositories*, add this repository as an **Integration**, then install **AISStream**.
