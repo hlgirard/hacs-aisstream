@@ -1,0 +1,140 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Monitor a region with aisstream.io",
+        "description": "Get a free API key at https://aisstream.io. Ships within the bounding box of the circle are tracked. Connecting can take up to a minute.",
+        "data": {
+          "api_key": "API key",
+          "region_name": "Region name",
+          "location": "Region"
+        }
+      },
+      "reconfigure": {
+        "title": "Change region",
+        "data": {
+          "api_key": "API key",
+          "region_name": "Region name",
+          "location": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "aisstream.io closed the connection without confirming the subscription. Check the API key.",
+      "cannot_connect": "Could not connect to aisstream.io.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "reconfigure_successful": "Region updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Track history",
+        "description": "Track database: {db_size} ({positions} positions). A busy harbor uses roughly 5–10 MB per day of retention. Favorite vessels have their own retention, set per favorite.",
+        "data": {
+          "retention_hours": "Keep tracks of all vessels for",
+          "stale_minutes": "Consider a vessel gone after"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "favorite": {
+      "initiate_flow": {
+        "user": "Add favorite vessel"
+      },
+      "entry_type": "Favorite vessel",
+      "step": {
+        "user": {
+          "title": "Add favorite vessel",
+          "description": "Favorites get a device tracker and keep their track history longer than other vessels.",
+          "data": {
+            "mmsi": "MMSI",
+            "alias": "Name (optional)",
+            "unlimited": "Keep history forever",
+            "retention_days": "Keep history for"
+          },
+          "data_description": {
+            "mmsi": "The vessel's 9-digit MMSI number.",
+            "retention_days": "Ignored when keeping history forever. Never shorter than the region retention."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit favorite {mmsi}",
+          "data": {
+            "alias": "Name (optional)",
+            "unlimited": "Keep history forever",
+            "retention_days": "Keep history for"
+          }
+        }
+      },
+      "error": {
+        "invalid_mmsi": "An MMSI is exactly 9 digits.",
+        "already_favorite": "This vessel is already a favorite."
+      },
+      "abort": {
+        "reconfigure_successful": "Favorite updated."
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      }
+    },
+    "button": {
+      "purge_history": {
+        "name": "Purge track history"
+      }
+    },
+    "sensor": {
+      "vessels": {
+        "name": "Vessels"
+      },
+      "vessels_underway": {
+        "name": "Vessels underway"
+      },
+      "message_rate": {
+        "name": "Message rate"
+      },
+      "last_message": {
+        "name": "Last message"
+      },
+      "last_seen": {
+        "name": "Last seen"
+      },
+      "speed": {
+        "name": "Speed"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "underway": "Under way",
+          "sailing": "Under way (sailing)",
+          "at_anchor": "At anchor",
+          "moored": "Moored",
+          "aground": "Aground",
+          "fishing": "Fishing",
+          "not_under_command": "Not under command",
+          "restricted_manoeuvrability": "Restricted manoeuvrability",
+          "constrained_by_draught": "Constrained by draught",
+          "emergency": "Emergency (AIS-SART)",
+          "stopped": "Stopped",
+          "out_of_range": "Out of range"
+        },
+        "state_attributes": {
+          "source": {
+            "name": "Source",
+            "state": {
+              "ais": "AIS report",
+              "inferred": "Inferred from speed"
+            }
+          }
+        }
+      }
+    }
+  }
+}
