@@ -10,6 +10,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .entity import FavoriteEntity
 from .hub import AisStreamConfigEntry, AisStreamHub, Favorite
 
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -28,7 +30,6 @@ class PurgeHistoryButton(FavoriteEntity, ButtonEntity):
     """Delete the stored track history of a favorite vessel."""
 
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:delete-clock"
 
     def __init__(self, hub: AisStreamHub, favorite: Favorite) -> None:
         """Initialise."""

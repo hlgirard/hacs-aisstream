@@ -50,7 +50,7 @@ On the map, a vessel counts as **moving** once it reports 1 kn or more. It stays
 
 Click a category in the legend to hide or show it; double-click it to show only that category (double-click again to show all). Legend counts follow the other filters (not heard recently, **Hide stopped**); the vessel count at the top is what is actually on the map.
 
-Click a vessel for details. For favorites, the popup offers history ranges (24h · 7d · 30d · 1y · All, capped by that favorite's retention), loaded from the database.
+Click a vessel for details (the text can be selected and copied). For favorites, the popup offers history ranges (6h · 24h · 7d · 30d · 1y · All, capped by that favorite's retention), loaded from the database. Picking one closes the popup and shows a small panel in the top-left corner instead, so the track stays visible: switch ranges there, ⓘ reopens the details, ✕ removes the track.
 
 The simple map shows only land, water, piers, major roads and place names. It is drawn in the browser with [MapLibre GL](https://maplibre.org) from [OpenFreeMap](https://openfreemap.org) vector tiles (free, no API key; needs WebGL, otherwise the card falls back to `osm`). MapLibre (about 1 MB) is only downloaded when the simple map is used. The `osm` map goes through Home Assistant's map tile proxy. Seamarks are loaded from OpenSeaMap. Their usage policies allow light personal use.
 
@@ -64,7 +64,9 @@ Per region:
 | `sensor.<region>_vessels_underway` | Moving vessels |
 | `sensor.<region>_message_rate` | Messages per minute (diagnostic) |
 | `sensor.<region>_last_message` | Last message time (diagnostic) |
-| `binary_sensor.<region>_connected` | Subscription status (diagnostic) |
+| `binary_sensor.<region>_connected` | Subscription status (diagnostic). Attribute `last_error` |
+
+The vessel count sensors become unavailable once the connection has been down for 5 minutes (reconnects normally take 10–20 s); the diagnostic sensors stay available, so you can see when the last message arrived. A server that is slow to confirm counts as a connection problem, not a rejected key. Losing and regaining the connection is logged at info level. If aisstream.io rejects the subscription 5 times in a row, which is how it reacts to a bad API key, Home Assistant asks you to re-enter the key (*Settings → Devices & services*). The prompt disappears on its own if the connection comes back.
 
 Per favorite vessel (one device each): `device_tracker.<name>` (works with zones and the stock map), `sensor.<name>_status`, `sensor.<name>_speed`, `sensor.<name>_last_seen`, and `button.<name>_purge_track_history`.
 

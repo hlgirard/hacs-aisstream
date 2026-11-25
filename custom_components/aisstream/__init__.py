@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from . import websocket_api
 from .const import CARD_FILENAME, DOMAIN, FRONTEND_URL_BASE
@@ -33,12 +33,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register(hass)
 
     frontend_dir = Path(__file__).parent / "frontend"
-    manifest = await hass.async_add_executor_job(
-        (Path(__file__).parent / "manifest.json").read_text
-    )
-    version = json.loads(manifest).get("version", "0")
+    version = (await async_get_integration(hass, DOMAIN)).version
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), cache_headers=False)]
+        [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), cache_headers=True)]
     )
     add_extra_js_url(hass, f"{FRONTEND_URL_BASE}/{CARD_FILENAME}?v={version}")
     return True
@@ -56,7 +53,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: AisStreamConfigEntry) ->
         await hub.async_start()
     except Exception as err:
         await hub.async_stop()  # closes the database
-        raise ConfigEntryNotReady(f"Could not open the track database: {err}") from err
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="database_error",
+            translation_placeholders={"error": str(err)},
+        ) from err
     entry.runtime_data = hub
 
     async def _on_stop(_event: Event) -> None:

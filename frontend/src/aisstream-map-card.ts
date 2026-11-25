@@ -36,6 +36,7 @@ const FADE: [number, number][] = [
 ];
 const DEFAULT_TRACK_MINUTES = 5;
 const HISTORY_RANGES: [string, number | null][] = [
+  ["6h", 6 * HOUR],
   ["24h", 24 * HOUR],
   ["7d", 7 * 24 * HOUR],
   ["30d", 30 * 24 * HOUR],
@@ -73,6 +74,7 @@ class AisStreamMapCard extends LitElement {
     _hideStopped: { state: true },
     _counts: { state: true },
     _shown: { state: true },
+    _history: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -84,6 +86,9 @@ class AisStreamMapCard extends LitElement {
   // Per category: vessels that would be shown if that category is enabled.
   private _counts: Record<string, number> = {};
   private _shown = 0;
+  // Favorite history on display: shown in a small docked panel instead of
+  // the popup, so the track isn't hidden behind it.
+  private _history?: { mmsi: number; range: string; status: string };
 
   private _map?: L.Map;
   private _renderer?: L.Canvas;
@@ -218,6 +223,8 @@ class AisStreamMapCard extends LitElement {
     this._regionLayer = L.layerGroup().addTo(this._map);
     this._historyLayer = L.layerGroup().addTo(this._map);
     this._map.on("popupclose", () => {
+      // The history panel keeps the vessel selected and its track drawn.
+      if (this._history) return;
       this._selected = undefined;
       this._historyGen++;
       this._historyLayer?.clearLayers();
@@ -891,16 +898,12 @@ class AisStreamMapCard extends LitElement {
     const entry = this._vessels.get(mmsi);
     if (!entry) return "";
     const d = entry.data;
-    const fav = this._favorites.get(mmsi);
     let history = "";
     if (d.favorite) {
-      const retention = fav?.retention_days ?? null;
-      const buttons = HISTORY_RANGES.filter(
-        ([, secs]) => retention === null || secs === null || secs <= Math.max(retention, 1) * 86400,
-      )
-        .map(([label]) => `<button data-range="${label}">${label}</button>`)
+      const buttons = this._historyRanges(mmsi)
+        .map((label) => `<button data-range="${label}">${label}</button>`)
         .join("");
-      history = `<div class="history"><span>History</span>${buttons}</div><div class="history-status"></div>`;
+      history = `<div class="history"><span>History</span>${buttons}</div>`;
     }
     const link = `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${d.mmsi}`;
     return `<div class="ais-popup">
@@ -911,9 +914,9 @@ class AisStreamMapCard extends LitElement {
   }
 
   private _onPopupOpen(mmsi: number, ev: L.PopupEvent): void {
+    // Reopening the vessel whose history is shown keeps it; another one clears it.
+    if (this._history?.mmsi !== mmsi) this._clearHistory();
     this._selected = mmsi;
-    this._historyGen++;
-    this._historyLayer?.clearLayers();
     this._queueRedraw();
     const el = ev.popup.getElement();
     // Leaflet reuses the popup element across opens: bind the handler once.
@@ -924,14 +927,55 @@ class AisStreamMapCard extends LitElement {
       if (!button) return;
       e.stopPropagation();
       const range = HISTORY_RANGES.find(([label]) => label === button.dataset.range);
-      if (range) this._loadHistory(mmsi, range[1], el);
+      if (range) this._loadHistory(mmsi, range[0]);
     });
   }
 
-  private async _loadHistory(mmsi: number, seconds: number | null, el: HTMLElement): Promise<void> {
-    const status = el.querySelector(".history-status");
-    if (status) status.textContent = "Loading…";
+  /** Drop the history line and panel. */
+  private _clearHistory(): void {
+    this._historyGen++;
+    this._historyLayer?.clearLayers();
+    if (this._history) {
+      this._history = undefined;
+      this._selected = undefined;
+      this._queueRedraw();
+    }
+  }
+
+  /** ✕ in the panel: also close the details popup if it was reopened. */
+  private _closeHistory(): void {
+    this._clearHistory();
+    this._map?.closePopup();
+  }
+
+  private _showDetails(): void {
+    const mmsi = this._history?.mmsi;
+    if (mmsi === undefined || !this._map) return;
+    const entry = this._vessels.get(mmsi);
+    if (entry?.marker) {
+      entry.marker.openPopup();
+      return;
+    }
+    // Hidden by a filter (or not drawn): open the details at the last position.
+    const d = entry?.data;
+    if (d?.lat == null || d.lon == null) return;
+    const popup = L.popup({ maxWidth: 300, minWidth: 220 })
+      .setLatLng([d.lat, d.lon])
+      .setContent(() => this._popupContent(mmsi))
+      .openOn(this._map);
+    this._onPopupOpen(mmsi, { popup } as L.PopupEvent);
+  }
+
+  private async _loadHistory(mmsi: number, label: string): Promise<void> {
+    const seconds = HISTORY_RANGES.find(([l]) => l === label)?.[1] ?? null;
     const gen = ++this._historyGen;
+    // Swap the popup for the compact panel while the track is on screen.
+    this._history = { mmsi, range: label, status: "Loading…" };
+    this._selected = mmsi;
+    this._map?.closePopup();
+    const setStatus = (status: string) => {
+      if (gen === this._historyGen && this._history) this._history = { ...this._history, status };
+    };
     try {
       const now = this._now();
       const result = await this.hass!.callWS<TrackResult>({
@@ -940,7 +984,7 @@ class AisStreamMapCard extends LitElement {
         mmsi,
         start: seconds === null ? 0 : now - seconds,
       });
-      // The popup was closed, or another range was requested, meanwhile.
+      // The panel was closed, or another range was requested, meanwhile.
       if (gen !== this._historyGen) return;
       this._historyLayer?.clearLayers();
       if (result.track.length >= 2) {
@@ -964,12 +1008,10 @@ class AisStreamMapCard extends LitElement {
         }).addTo(this._historyLayer!);
         this._map!.fitBounds(line.getBounds(), { padding: [30, 30], maxZoom: 15 });
       }
-      if (status) {
-        const since = result.first_ts ? new Date(result.first_ts * 1000).toLocaleDateString() : null;
-        status.textContent = `${result.track.length} points${since ? ` · stored since ${since}` : ""}`;
-      }
+      const since = result.first_ts ? new Date(result.first_ts * 1000).toLocaleDateString() : null;
+      setStatus(`${result.track.length} points${since ? ` · since ${since}` : ""}`);
     } catch (err: any) {
-      if (status && gen === this._historyGen) status.textContent = `Error: ${err?.message ?? err}`;
+      setStatus(`Error: ${err?.message ?? err}`);
     }
   }
 
@@ -995,6 +1037,39 @@ class AisStreamMapCard extends LitElement {
     else hidden.add(category);
     this._hidden = hidden;
     this._queueRedraw();
+  }
+
+  private _historyRanges(mmsi: number): string[] {
+    const retention = this._favorites.get(mmsi)?.retention_days ?? null;
+    return HISTORY_RANGES.filter(
+      ([, secs]) => retention === null || secs === null || secs <= Math.max(retention, 1) * 86400,
+    ).map(([label]) => label);
+  }
+
+  private _renderHistoryPanel() {
+    const h = this._history;
+    if (!h) return nothing;
+    return html`<div class="overlay history-panel">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="star">★</span>
+          <span class="panel-name">${this._displayName(h.mmsi)}</span>
+          <button class="icon" title="Vessel details" @click=${this._showDetails}>ⓘ</button>
+          <button class="icon" title="Close history" @click=${this._closeHistory}>✕</button>
+        </div>
+        <div class="panel-ranges">
+          ${this._historyRanges(h.mmsi).map(
+            (label) => html`<button
+              class=${label === h.range ? "active" : ""}
+              @click=${() => this._loadHistory(h.mmsi, label)}
+            >
+              ${label}
+            </button>`,
+          )}
+        </div>
+        <div class="panel-status">${h.status}</div>
+      </div>
+    </div>`;
   }
 
   protected render() {
@@ -1024,6 +1099,7 @@ class AisStreamMapCard extends LitElement {
             </button>
             <span class="count">${total} vessels</span>
           </div>
+          ${this._renderHistoryPanel()}
           ${categories.length
             ? html`<div class="overlay legend">
                 ${categories.map(
@@ -1202,10 +1278,74 @@ class AisStreamMapCard extends LitElement {
         color: var(--primary-text-color, #222);
         cursor: pointer;
       }
-      .ais-popup .history-status {
-        font-size: 11px;
+      /* Details can be selected and copied (MMSI, call sign…). */
+      .leaflet-popup-content {
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: auto;
+      }
+      .history-panel {
+        top: 8px;
+        left: 52px;
+        max-width: max(170px, calc(100% - 200px));
+      }
+      .panel {
+        font: 12px/1.3 var(--ha-font-family-body, Roboto, sans-serif);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #222);
+        border-radius: 10px;
+        padding: 6px 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        min-width: 0;
+      }
+      .panel-head {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 600;
+      }
+      .panel-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .panel .star {
+        color: ${unsafeCSS(FAVORITE_COLOR)};
+      }
+      .panel button {
+        font: inherit;
+        font-weight: 400;
+        border: 1px solid var(--divider-color, #ccc);
+        background: var(--secondary-background-color, #f5f5f5);
+        color: var(--primary-text-color, #222);
+        border-radius: 10px;
+        padding: 1px 7px;
+        cursor: pointer;
+      }
+      .panel button.icon {
+        border: none;
+        background: none;
+        padding: 0 3px;
+        font-size: 14px;
         color: var(--secondary-text-color, #666);
-        min-height: 14px;
+      }
+      .panel button.active {
+        background: ${unsafeCSS(FAVORITE_COLOR)};
+        border-color: ${unsafeCSS(FAVORITE_COLOR)};
+        color: #000;
+      }
+      .panel-ranges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        margin-top: 4px;
+      }
+      .panel-status {
+        color: var(--secondary-text-color, #666);
+        font-size: 11px;
+        margin-top: 3px;
       }
       .ais-popup a {
         color: var(--primary-color, #03a9f4);

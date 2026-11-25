@@ -21,6 +21,12 @@ IDLE_TIMEOUT: Final = 900
 BACKOFF_INITIAL: Final = 2.0
 BACKOFF_MAX: Final = 300.0
 STABLE_CONNECTION: Final = 60.0
+# aisstream.io rejects a bad API key by closing the socket before confirming.
+# After this many rejections in a row, ask the user to re-enter the key.
+AUTH_FAIL_THRESHOLD: Final = 5
+# Region entities become unavailable after this long without a connection
+# (reconnect handshakes take 7-16 s, so short blips don't count).
+UNAVAILABLE_AFTER_S: Final = 300
 
 POSITION_TYPES: Final = (
     "PositionReport",

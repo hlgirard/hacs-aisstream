@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestServer
 from custom_components.aisstream import client as client_mod
 from custom_components.aisstream.client import (
     AisStreamClient,
+    CannotConnect,
     InvalidSubscription,
     build_subscription,
     validate_subscription,
@@ -30,6 +31,10 @@ def _server(mode: str, received: list[dict[str, Any]]) -> web.Application:
         assert msg.type in (WSMsgType.TEXT, WSMsgType.BINARY)
         sub = json.loads(msg.data)
         received.append(sub)
+        if mode == "silent":
+            async for _ in ws:  # never confirm
+                pass
+            return ws
         if mode == "reject" or sub["APIKey"] != API_KEY:
             await ws.close()
             return ws
@@ -186,4 +191,70 @@ async def test_bad_message_keeps_connection() -> None:
                 await task
     assert handled == [101, 102]
     assert len(received) == 1 and c.connect_count == 1
+    await server.close()
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_repeated_rejection_requests_reauth() -> None:
+    import aiohttp
+
+    received: list = []
+    server = await _start("reject", received)
+    url = str(server.make_url("/v0/stream")).replace("http", "ws")
+    failed: list[bool] = []
+    async with aiohttp.ClientSession() as session:
+        with (
+            patch.object(client_mod, "WS_URL", url),
+            patch.object(client_mod, "BACKOFF_MAX", 0.01),
+        ):
+            c = AisStreamClient(
+                session, lambda: build_subscription(API_KEY, [BOSTON_BOX]),
+                lambda m, ts: None, None, on_auth_failed=lambda: failed.append(True),
+            )
+            c._backoff = 0.01
+            task = asyncio.create_task(c.run())
+            for _ in range(300):
+                if len(received) >= 7:
+                    break
+                await asyncio.sleep(0.02)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    assert failed == [True]  # once, at the threshold, while it keeps retrying
+    await server.close()
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_confirmation_timeout_is_not_a_rejection() -> None:
+    """A slow server must not look like a bad key."""
+    import aiohttp
+
+    received: list = []
+    server = await _start("silent", received)
+    url = str(server.make_url("/v0/stream")).replace("http", "ws")
+    failed: list[bool] = []
+    async with aiohttp.ClientSession() as session:
+        with (
+            patch.object(client_mod, "WS_URL", url),
+            patch.object(client_mod, "CONFIRM_TIMEOUT", 0.05),
+            patch.object(client_mod, "BACKOFF_MAX", 0.01),
+        ):
+            with pytest.raises(CannotConnect):
+                await validate_subscription(session, build_subscription(API_KEY, [BOSTON_BOX]))
+            c = AisStreamClient(
+                session, lambda: build_subscription(API_KEY, [BOSTON_BOX]),
+                lambda m, ts: None, None, on_auth_failed=lambda: failed.append(True),
+            )
+            c._backoff = 0.01
+            task = asyncio.create_task(c.run())
+            for _ in range(300):
+                if len(received) >= 8:
+                    break
+                await asyncio.sleep(0.02)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    assert len(received) >= 8
+    assert failed == [] and c.rejections == 0
+    assert c.last_error == "no subscription confirmation received"
     await server.close()

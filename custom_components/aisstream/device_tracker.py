@@ -13,6 +13,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .entity import FavoriteEntity
 from .hub import AisStreamConfigEntry, AisStreamHub, Favorite
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -32,7 +34,11 @@ class FavoriteTracker(FavoriteEntity, TrackerEntity):
 
     _attr_name = None  # use the device name
     _attr_source_type = SourceType.GPS
-    _attr_icon = "mdi:ferry"
+    _attr_translation_key = "vessel"
+    # Static details: keep them out of every recorded position.
+    _unrecorded_attributes = frozenset(
+        {"mmsi", "vessel_name", "callsign", "imo", "category", "length_m"}
+    )
 
     def __init__(self, hub: AisStreamHub, favorite: Favorite) -> None:
         """Initialise."""

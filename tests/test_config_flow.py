@@ -123,3 +123,77 @@ async def test_favorite_subentry_flow(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.ABORT
     assert entry.subentries[sub.subentry_id].data[CONF_RETENTION_DAYS] is None
+
+
+async def test_duplicate_region_aborts(hass: HomeAssistant) -> None:
+    from custom_components.aisstream.models import circle_to_box
+
+    loc = USER_INPUT[CONF_LOCATION]
+    entry = _entry()
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_BOXES: [circle_to_box(loc["latitude"], loc["longitude"], loc["radius"])]}
+    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    with patch(VALIDATE, AsyncMock()) as validate:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    validate.assert_not_called()
+
+
+async def test_reauth_flow(hass: HomeAssistant) -> None:
+    entry = _entry()
+    entry.add_to_hass(hass)
+    result = await entry.start_reauth_flow(hass)
+    assert result["step_id"] == "reauth_confirm"
+    with patch(VALIDATE, AsyncMock(side_effect=InvalidSubscription("closed"))):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: "bad"})
+    assert result["errors"] == {"base": "invalid_auth"}
+    with (
+        patch(VALIDATE, AsyncMock()),
+        patch("custom_components.aisstream.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: " newkey "})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_API_KEY] == "newkey"
+
+
+async def test_reconfigure_onto_other_region_aborts(hass: HomeAssistant) -> None:
+    from custom_components.aisstream.models import circle_to_box
+
+    loc = USER_INPUT[CONF_LOCATION]
+    box = circle_to_box(loc["latitude"], loc["longitude"], loc["radius"])
+    other = _entry()
+    other.add_to_hass(hass)
+    hass.config_entries.async_update_entry(other, data={**other.data, CONF_BOXES: [box]})
+    entry = _entry()
+    entry.add_to_hass(hass)
+    result = await entry.start_reconfigure_flow(hass)
+    with patch(VALIDATE, AsyncMock()) as validate:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    validate.assert_not_called()
+
+
+async def test_reconfigure_same_region_is_not_a_duplicate(hass: HomeAssistant) -> None:
+    from custom_components.aisstream.models import circle_to_box
+
+    loc = USER_INPUT[CONF_LOCATION]
+    entry = _entry()
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_BOXES: [circle_to_box(loc["latitude"], loc["longitude"], loc["radius"])]}
+    )
+    result = await entry.start_reconfigure_flow(hass)
+    with (
+        patch(VALIDATE, AsyncMock()),
+        patch("custom_components.aisstream.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**USER_INPUT, CONF_REGION_NAME: "Harbor"}
+        )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.title == "Harbor"

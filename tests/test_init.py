@@ -355,3 +355,51 @@ async def test_store_calls_after_stop(hass: HomeAssistant) -> None:
     await hub._async_prune()  # no error once the store is closed
     with pytest.raises(HomeAssistantError):
         await hub.async_track(FAV, 0, None)
+
+
+async def test_reauth_started_and_cleared(hass: HomeAssistant) -> None:
+    from homeassistant.config_entries import SOURCE_REAUTH
+
+    entry = await _setup(hass)
+    hub: AisStreamHub = entry.runtime_data
+    hub._on_auth_failed()
+    await hass.async_block_till_done()
+    assert entry.async_get_active_flows(hass, {SOURCE_REAUTH})
+    hub._on_status(True)  # the key works after all
+    await hass.async_block_till_done()
+    assert not list(entry.async_get_active_flows(hass, {SOURCE_REAUTH}))
+
+
+async def test_region_entities_unavailable_after_grace(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    hub: AisStreamHub = entry.runtime_data
+    hub.client.connected = True
+    hub._on_status(True)
+    await hub._async_flush(object())
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.boston_harbor_vessels").state != "unavailable"
+    hub.client.connected = False
+    hub._on_status(False)
+    hub.disconnected_since -= 301  # pretend 5 min passed
+    await hub._async_flush(object())
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.boston_harbor_vessels").state == "unavailable"
+    assert hass.states.get("binary_sensor.boston_harbor_connected").state == "off"
+    # The diagnostics stay up: they show the outage.
+    assert hass.states.get("sensor.boston_harbor_last_message").state != "unavailable"
+    assert hass.states.get("sensor.boston_harbor_message_rate").state != "unavailable"
+    assert hass.states.get("device_tracker.freedom") is None or (
+        hass.states.get("device_tracker.freedom").state != "unavailable"
+    )
+
+
+async def test_hass_errors_are_translated(hass: HomeAssistant) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry = await _setup(hass)
+    hub: AisStreamHub = entry.runtime_data
+    await hub.async_stop()
+    with pytest.raises(HomeAssistantError) as err:
+        await hub.async_track(FAV, 0, None)
+    assert err.value.translation_key == "restarting"
+    assert "Boston Harbor is restarting" in str(err.value)

@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
+import custom_components.aisstream  # noqa: F401  (patched by stub_frontend)
+
 FIXTURES = Path(__file__).parent / "fixtures"
 API_KEY = "0123456789abcdef0123456789abcdef01234567"
 BOSTON_BOX = [[42.42, -71.10], [42.25, -70.85]]

@@ -45,7 +45,10 @@ class AisStreamEntity(Entity):
 
     @callback
     def _handle_update(self) -> None:
-        if self._refresh():
+        available = self.available
+        changed = available != getattr(self, "_was_available", True)
+        self._was_available = available
+        if self._refresh() or changed:
             self.async_write_ha_state()
 
     @callback
@@ -64,6 +67,11 @@ class RegionEntity(AisStreamEntity):
         self._attr_unique_id = f"{entry_id}_{key}"
         self._attr_translation_key = key
         self._attr_device_info = region_device_info(hub)
+
+    @property
+    def available(self) -> bool:
+        """Counts go stale without a connection: unavailable after a grace period."""
+        return self.hub.available
 
 
 class FavoriteEntity(AisStreamEntity):

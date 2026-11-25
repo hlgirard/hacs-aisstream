@@ -13,6 +13,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .entity import RegionEntity
 from .hub import AisStreamConfigEntry, AisStreamHub
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -32,6 +34,11 @@ class ConnectedSensor(RegionEntity, BinarySensorEntity):
     def __init__(self, hub: AisStreamHub) -> None:
         """Initialise."""
         super().__init__(hub, "connected")
+
+    @property
+    def available(self) -> bool:
+        """Always available: it reports the outage itself."""
+        return True
 
     @callback
     def _refresh(self) -> bool:

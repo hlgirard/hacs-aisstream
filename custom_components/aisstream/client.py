@@ -13,6 +13,7 @@ from typing import Any
 import aiohttp
 
 from .const import (
+    AUTH_FAIL_THRESHOLD,
     BACKOFF_INITIAL,
     BACKOFF_MAX,
     CONFIRM_TIMEOUT,
@@ -108,7 +109,8 @@ async def _await_confirmation(ws: aiohttp.ClientWebSocketResponse) -> dict[str, 
                     return parsed
                 # Data before the confirmation would be unexpected; tolerate it.
     except TimeoutError as err:
-        raise InvalidSubscription("no subscription confirmation received") from err
+        # A slow or overloaded server, not a rejection: a bad key is closed at once.
+        raise CannotConnect("no subscription confirmation received") from err
 
 
 async def validate_subscription(
@@ -134,6 +136,7 @@ class AisStreamClient:
         on_message: Callable[[dict[str, Any], float], None],
         on_status: Callable[[bool], None] | None = None,
         name: str = "aisstream",
+        on_auth_failed: Callable[[], None] | None = None,
     ) -> None:
         """Initialise. subscription_factory is re-evaluated on every connect."""
         self._session = session
@@ -148,10 +151,20 @@ class AisStreamClient:
         self.message_count = 0
         self.compression: bool | None = None
         self._backoff = BACKOFF_INITIAL
+        self._on_auth_failed = on_auth_failed
+        self.rejections = 0  # consecutive subscriptions closed unconfirmed
 
-    def _set_connected(self, value: bool) -> None:
+    def _set_connected(self, value: bool, log: bool = True) -> None:
         if value != self.connected:
             self.connected = value
+            if log and value and self.connect_count > 1:
+                _LOGGER.info("%s: connection to aisstream.io restored", self.name)
+            elif log and not value:
+                _LOGGER.info(
+                    "%s: connection to aisstream.io lost (%s), reconnecting",
+                    self.name,
+                    self.last_error or "closed by server",
+                )
             if self._on_status:
                 self._on_status(value)
 
@@ -164,13 +177,21 @@ class AisStreamClient:
                     # Idle stream: reconnect straight away, keep "connected" on.
                     continue
             except asyncio.CancelledError:
-                self._set_connected(False)
+                self._set_connected(False, log=False)  # shutting down
                 raise
             except InvalidSubscription as err:
                 self.last_error = str(err)
-                _LOGGER.warning(
-                    "%s: subscription rejected (%s). Check the API key", self.name, err
-                )
+                self.rejections += 1
+                _LOGGER.debug("%s: subscription rejected: %s", self.name, err)
+                if self.rejections == AUTH_FAIL_THRESHOLD:
+                    _LOGGER.warning(
+                        "%s: aisstream.io rejected the subscription %d times in a row."
+                        " Check the API key",
+                        self.name,
+                        self.rejections,
+                    )
+                    if self._on_auth_failed:
+                        self._on_auth_failed()
             except CannotConnect as err:
                 self.last_error = str(err)
                 _LOGGER.debug("%s: cannot connect: %s", self.name, err)
@@ -195,6 +216,7 @@ class AisStreamClient:
                 "CompressionEnabled"
             )
             self.connect_count += 1
+            self.rejections = 0
             self.last_error = None
             self._set_connected(True)
             _LOGGER.debug("%s: subscribed (compression=%s)", self.name, self.compression)

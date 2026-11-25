@@ -3,11 +3,16 @@
     "step": {
       "user": {
         "title": "Monitor a region with aisstream.io",
-        "description": "Get a free API key at https://aisstream.io. Ships within the bounding box of the circle are tracked. Connecting can take up to a minute.",
+        "description": "Get a free API key at {url}. Ships within the bounding box of the circle are tracked. Connecting can take up to a minute.",
         "data": {
           "api_key": "API key",
           "region_name": "Region name",
           "location": "Region"
+        },
+        "data_description": {
+          "api_key": "Your aisstream.io API key.",
+          "region_name": "Name of the region device and its entities.",
+          "location": "Vessels inside the square around this circle are tracked."
         }
       },
       "reconfigure": {
@@ -16,6 +21,21 @@
           "api_key": "API key",
           "region_name": "Region name",
           "location": "Region"
+        },
+        "data_description": {
+          "api_key": "Your aisstream.io API key.",
+          "region_name": "Name of the region device and its entities.",
+          "location": "Vessels inside the square around this circle are tracked."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-enter the aisstream.io API key",
+        "description": "aisstream.io keeps rejecting the subscription for {region}. Enter a valid API key (from {url}).",
+        "data": {
+          "api_key": "API key"
+        },
+        "data_description": {
+          "api_key": "Your aisstream.io API key."
         }
       }
     },
@@ -25,7 +45,9 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "reconfigure_successful": "Region updated."
+      "reconfigure_successful": "Region updated.",
+      "already_configured": "This region is already monitored with this API key.",
+      "reauth_successful": "API key updated."
     }
   },
   "options": {
@@ -36,6 +58,10 @@
         "data": {
           "retention_hours": "Keep tracks of all vessels for",
           "stale_minutes": "Consider a vessel gone after"
+        },
+        "data_description": {
+          "retention_hours": "Track points of all vessels older than this are deleted from disk. Favorites can keep theirs longer.",
+          "stale_minutes": "Vessels not heard for this long no longer count as in the region, and favorites become out of range."
         }
       }
     }
@@ -58,7 +84,9 @@
           },
           "data_description": {
             "mmsi": "The vessel's 9-digit MMSI number.",
-            "retention_days": "Ignored when keeping history forever. Never shorter than the region retention."
+            "retention_days": "Ignored when keeping history forever. Never shorter than the region retention.",
+            "alias": "Shown instead of the vessel name.",
+            "unlimited": "Never delete this vessel's track history."
           }
         },
         "reconfigure": {
@@ -67,6 +95,11 @@
             "alias": "Name (optional)",
             "unlimited": "Keep history forever",
             "retention_days": "Keep history for"
+          },
+          "data_description": {
+            "alias": "Shown instead of the vessel name.",
+            "unlimited": "Never delete this vessel's track history.",
+            "retention_days": "Ignored when keeping history forever. Never shorter than the region retention."
           }
         }
       },
@@ -135,6 +168,14 @@
           }
         }
       }
+    }
+  },
+  "exceptions": {
+    "restarting": {
+      "message": "{region} is restarting, try again in a moment."
+    },
+    "database_error": {
+      "message": "Could not open the track database: {error}"
     }
   }
 }

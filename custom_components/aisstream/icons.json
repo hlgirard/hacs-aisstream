@@ -1,0 +1,59 @@
+{
+  "entity": {
+    "device_tracker": {
+      "vessel": {
+        "default": "mdi:ferry"
+      }
+    },
+    "button": {
+      "purge_history": {
+        "default": "mdi:delete-clock"
+      }
+    },
+    "binary_sensor": {
+      "connected": {
+        "default": "mdi:access-point-network",
+        "state": {
+          "off": "mdi:access-point-network-off"
+        }
+      }
+    },
+    "sensor": {
+      "vessels": {
+        "default": "mdi:ferry"
+      },
+      "vessels_underway": {
+        "default": "mdi:waves-arrow-right"
+      },
+      "message_rate": {
+        "default": "mdi:message-processing"
+      },
+      "last_message": {
+        "default": "mdi:message-badge"
+      },
+      "last_seen": {
+        "default": "mdi:eye-check"
+      },
+      "speed": {
+        "default": "mdi:speedometer"
+      },
+      "status": {
+        "default": "mdi:ferry",
+        "state": {
+          "underway": "mdi:ferry",
+          "sailing": "mdi:sail-boat",
+          "at_anchor": "mdi:anchor",
+          "moored": "mdi:pier",
+          "aground": "mdi:alert-octagon",
+          "fishing": "mdi:fish",
+          "not_under_command": "mdi:alert",
+          "restricted_manoeuvrability": "mdi:alert-outline",
+          "constrained_by_draught": "mdi:arrow-collapse-down",
+          "emergency": "mdi:lifebuoy",
+          "stopped": "mdi:pause-circle-outline",
+          "out_of_range": "mdi:signal-off"
+        }
+      }
+    }
+  }
+}

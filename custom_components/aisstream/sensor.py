@@ -11,13 +11,15 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfSpeed
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import VESSEL_STATUSES
 from .entity import FavoriteEntity, RegionEntity
 from .hub import AisStreamConfigEntry, AisStreamHub, Favorite
+
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -104,6 +106,11 @@ class MessageRateSensor(RegionEntity, SensorEntity):
         """Initialise."""
         super().__init__(hub, "message_rate")
 
+    @property
+    def available(self) -> bool:
+        """Stay available during an outage: it shows how long it has lasted."""
+        return True
+
     @callback
     def _refresh(self) -> bool:
         value = self.hub.registry.messages_per_minute(time.time())
@@ -122,6 +129,11 @@ class LastMessageSensor(RegionEntity, SensorEntity):
         """Initialise."""
         super().__init__(hub, "last_message")
         self._last_written = 0.0
+
+    @property
+    def available(self) -> bool:
+        """Stay available during an outage: it shows how long it has lasted."""
+        return True
 
     @callback
     def _refresh(self) -> bool:
@@ -157,7 +169,7 @@ class FavoriteSpeedSensor(FavoriteEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.SPEED
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "kn"
+    _attr_native_unit_of_measurement = UnitOfSpeed.KNOTS
     _attr_suggested_display_precision = 1
 
     def __init__(self, hub: AisStreamHub, favorite: Favorite) -> None:
@@ -187,19 +199,18 @@ class FavoriteStatusSensor(FavoriteEntity, SensorEntity):
     def __init__(self, hub: AisStreamHub, favorite: Favorite) -> None:
         """Initialise."""
         super().__init__(hub, favorite, "status")
-        self._attr_icon = "mdi:ferry"
 
     @callback
     def _refresh(self) -> bool:
         vessel = self.vessel
         value = vessel.status(time.time(), self.hub.registry.stale_s) if vessel else None
-        source = vessel.status_source() if vessel else None
-        changed = (value, source) != (self._attr_native_value, getattr(self, "_source", None))
-        self._attr_native_value = value
-        self._source = source
-        self._attr_extra_state_attributes = {
-            "source": source,
+        attrs = {
+            "source": vessel.status_source() if vessel else None,
             "ais_nav_status": vessel.nav_status if vessel else None,
-            "speed_kn": vessel.sog if vessel else None,
         }
+        changed = value != self._attr_native_value or attrs != getattr(
+            self, "_attr_extra_state_attributes", None
+        )
+        self._attr_native_value = value
+        self._attr_extra_state_attributes = attrs
         return changed

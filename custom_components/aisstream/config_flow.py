@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -84,6 +85,7 @@ class AisStreamConfigFlow(ConfigFlow, domain=DOMAIN):
             radius = float(loc.get("radius") or DEFAULT_RADIUS_M)
             boxes = [circle_to_box(loc["latitude"], loc["longitude"], radius)]
             api_key = user_input[CONF_API_KEY].strip()
+            self._async_abort_entries_match({CONF_API_KEY: api_key, CONF_BOXES: boxes})
             errors = await _validate(self, api_key, boxes)
             if not errors:
                 name = user_input[CONF_REGION_NAME].strip()
@@ -113,7 +115,7 @@ class AisStreamConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_API_KEY, default=default_key): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.PASSWORD)
                 ),
-                vol.Required(CONF_REGION_NAME, default="Home waters"): str,
+                vol.Required(CONF_REGION_NAME, default="Home waters"): TextSelector(),
                 vol.Required(
                     CONF_LOCATION,
                     default={
@@ -128,6 +130,42 @@ class AisStreamConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=self.add_suggested_values_to_schema(schema, user_input),
             errors=errors,
+            description_placeholders={"url": "https://aisstream.io"},
+        )
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """aisstream.io keeps rejecting the subscription."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for a new API key."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            api_key = user_input[CONF_API_KEY].strip()
+            errors = await _validate(self, api_key, entry.data[CONF_BOXES])
+            if not errors:
+                if api_key == entry.data[CONF_API_KEY]:
+                    # Same key (aisstream.io was down): the update listener
+                    # won't fire, so reconnect now.
+                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                # Otherwise the update listener reloads the entry.
+                return self.async_update_and_abort(
+                    entry, data_updates={CONF_API_KEY: api_key}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_API_KEY): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    )
+                }
+            ),
+            errors=errors,
+            description_placeholders={"region": entry.title, "url": "https://aisstream.io"},
         )
 
     async def async_step_reconfigure(
@@ -141,6 +179,13 @@ class AisStreamConfigFlow(ConfigFlow, domain=DOMAIN):
             radius = float(loc.get("radius") or DEFAULT_RADIUS_M)
             boxes = [circle_to_box(loc["latitude"], loc["longitude"], radius)]
             api_key = user_input[CONF_API_KEY].strip()
+            if any(
+                other.entry_id != entry.entry_id
+                and other.data.get(CONF_API_KEY) == api_key
+                and other.data.get(CONF_BOXES) == boxes
+                for other in self._async_current_entries(include_ignore=False)
+            ):
+                return self.async_abort(reason="already_configured")
             errors = await _validate(self, api_key, boxes)
             if not errors:
                 name = user_input[CONF_REGION_NAME].strip()
@@ -166,7 +211,7 @@ class AisStreamConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(
                     CONF_REGION_NAME, default=entry.data.get(CONF_REGION_NAME, entry.title)
-                ): str,
+                ): TextSelector(),
                 vol.Required(
                     CONF_LOCATION, default=entry.data.get(CONF_LOCATION)
                 ): LocationSelector(LocationSelectorConfig(radius=True, icon="mdi:ferry")),
@@ -261,7 +306,7 @@ class FavoriteSubentryFlow(ConfigSubentryFlow):
                     data=data,
                     unique_id=mmsi,
                 )
-        schema = vol.Schema({vol.Required(CONF_MMSI): str, **_favorite_fields({})})
+        schema = vol.Schema({vol.Required(CONF_MMSI): TextSelector(), **_favorite_fields({})})
         return self.async_show_form(
             step_id="user",
             data_schema=self.add_suggested_values_to_schema(schema, user_input),
@@ -300,7 +345,9 @@ class FavoriteSubentryFlow(ConfigSubentryFlow):
 def _favorite_fields(current: Any) -> dict[Any, Any]:
     retention = current.get(CONF_RETENTION_DAYS)
     return {
-        vol.Optional(CONF_ALIAS, description={"suggested_value": current.get(CONF_ALIAS)}): str,
+        vol.Optional(
+            CONF_ALIAS, description={"suggested_value": current.get(CONF_ALIAS)}
+        ): TextSelector(),
         vol.Required(
             CONF_UNLIMITED, default=bool(current) and retention is None
         ): BooleanSelector(),

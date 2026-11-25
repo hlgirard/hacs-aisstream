@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry
 from homeassistant.const import CONF_API_KEY
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -36,6 +36,7 @@ from .const import (
     PRUNE_INTERVAL_S,
     SUBENTRY_FAVORITE,
     TRACK_MAX_POINTS,
+    UNAVAILABLE_AFTER_S,
 )
 from .models import TrackPoint
 from .registry import VesselRegistry, encode_track
@@ -104,7 +105,10 @@ class AisStreamHub:
             self._on_message,
             self._on_status,
             name=self.region_name,
+            on_auth_failed=self._on_auth_failed,
         )
+        # When the connection went down (monotonic); set until the first connect.
+        self.disconnected_since: float | None = time.monotonic()
         # Serialises database work so a flush, prune, purge or query never
         # interleave (and nothing touches the store once it is closed).
         self._db_lock = asyncio.Lock()
@@ -180,6 +184,25 @@ class AisStreamHub:
     @callback
     def _on_status(self, connected: bool) -> None:
         self._status_changed = True
+        if connected:
+            self.disconnected_since = None
+            # The key works (again): drop a pending re-authentication request.
+            for flow in self.entry.async_get_active_flows(self.hass, {SOURCE_REAUTH}):
+                self.hass.config_entries.flow.async_abort(flow["flow_id"])
+        elif self.disconnected_since is None:
+            self.disconnected_since = time.monotonic()
+
+    @callback
+    def _on_auth_failed(self) -> None:
+        self.entry.async_start_reauth(self.hass)
+
+    @property
+    def available(self) -> bool:
+        """False once disconnected for longer than a reconnect normally takes."""
+        return (
+            self.disconnected_since is None
+            or time.monotonic() - self.disconnected_since < UNAVAILABLE_AFTER_S
+        )
 
     @property
     def connected(self) -> bool:
@@ -335,7 +358,11 @@ class AisStreamHub:
 
     def _check_running(self) -> None:
         if self._stopped:
-            raise HomeAssistantError(f"{self.region_name} is restarting, try again")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="restarting",
+                translation_placeholders={"region": self.region_name},
+            )
 
     def diagnostics(self) -> dict[str, Any]:
         """Runtime statistics."""
